@@ -62,10 +62,10 @@ class downsampling(nn.Module):
 # Upsampling (doubleconv+upsampling)
 class upsampling(nn.Module):
     
-    def __init__(self, in_channels, out_channels, upsampling_mode, concat_mode):
+    def __init__(self, in_channels, out_channels, upsampling_mode, output_input):
         super().__init__()
         self.upsamplig_mode = upsampling_mode
-        self.concat_mode = concat_mode
+        self.concat_mode = output_input
         
         self.upsample = nn.Sequential(
             nn.Upsample(scale_factor=2, mode=upsampling_mode), #mode can be:'nearest','linear','bilinear','bicubic','trilinear'
@@ -88,7 +88,7 @@ class upsampling(nn.Module):
     def forward(self, x, x_down):   
         x = self.upsample(x)
         
-        if self.concat_mode == 'crop':
+        if self.concat_mode == 'different':
             # Crop contracting path outputs and concat with expanding map
             H = x.size(dim=2)
             W = x.size(dim=3)  
@@ -97,7 +97,8 @@ class upsampling(nn.Module):
 
             cropped_x_down = crop(x_down, top, left, H, W)
             x = cat((x, cropped_x_down), dim=1) #check dim
-        elif self.concat_mode == 'pad':
+            
+        elif self.concat_mode == 'same':
             # Pad expanding path outputs and concat with contracting map
             H_diff = x_down.size(dim=2) - x.size(dim=2)
             H_left = H_diff//2
@@ -105,18 +106,24 @@ class upsampling(nn.Module):
             W_left = W_diff//2
             padded_x = F.pad(x, (W_left, (W_diff - W_left), H_left, (H_diff - H_left)))
             x = cat((padded_x, x_down), dim=1)
+        else:
+            raise Exception(f"{self.concat_mode} is not a valid input for output_input")
         
         return self.double_conv(x)
     
 # Final layer (class mapping)
 class final(nn.Module):
     
-    def __init__(self, in_channels, n_outputs, output_size, upsampling_mode):
+    def __init__(self, in_channels, n_outputs, output_size, upsampling_mode, output_input):
         super().__init__()
-        self.output = nn.Sequential(
+        self.output_input = output_input
+        
+        self.output_same = nn.Sequential(
             nn.Upsample(size=output_size, mode=upsampling_mode),
             nn.Conv2d(in_channels, n_outputs, kernel_size=1)
         )
+        
+        self.output_valid = nn.Conv2d(in_channels, n_outputs, kernel_size=1)
         self.apply(self._init_weights)
 
     def _init_weights(self, module):
@@ -130,11 +137,18 @@ class final(nn.Module):
                 module.bias.data.zero_()
 
     def forward(self, x):
-        return self.output(x) 
+        # For output_size = input_size
+        if self.output_input == 'same':
+            return self.output_same
+        # If it is okay for output and input sizes being different
+        elif self.output_input == 'different':
+            return self.output(x) 
+        else:
+            raise Exception(f"{self.output_input} is not a valid input for output_input")
 
 # UNet
 class UNet(nn.Module):
-    def __init__(self, output_size, in_channels=1, out_channels=3, upsampling_mode='nearest', concat_mode='pad'):
+    def __init__(self, output_size, in_channels=1, out_channels=3, upsampling_mode='nearest', output_input='same'):
         super().__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -158,10 +172,13 @@ class UNet(nn.Module):
         self.output = final(64, out_channels, upsampling_mode=upsampling_mode, output_size=output_size)
         
         # Dropout
-        self.final_dropout = nn.Dropout2d(p=0.4)
+        self.init_dropout = nn.Dropout2d(p=0.2)
+        self.final_dropout = nn.Dropout2d(p=0.2)
     
     def forward(self, x):
         x_init = self.input_process(x)
+        # Dropout as noise
+        x_init = self.init_dropout(x_init)
         x_down1 = self.contraction1(x_init)
         x_down2 = self.contraction2(x_down1)
         x_down3 = self.contraction3(x_down2)
@@ -171,7 +188,7 @@ class UNet(nn.Module):
         x = self.expansion3(x, x_down1)
         x = self.expansion4(x, x_init)
         # Dropout as noise
-        x = self.final_dropout(x)
+        #x = self.final_dropout(x)
         return self.output(x)
     
     def _init_weights(self, module):

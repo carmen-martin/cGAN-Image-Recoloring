@@ -7,10 +7,8 @@ class CGANDiscriminatorLoss(nn.Module):
         pass
 
     def __call__(self, real, fake):
+        # Possibility: compare final matrix to a block 1 for real, and a block 0 for fake instead of mean
         loss = -1 * torch.mean(torch.log(real) + torch.log(1 - fake))
-        if real > 1 or real < 0 or fake > 1 or fake < 0:
-            print(f'D:{real = }\n  {fake = }')
-            print(f'  {loss = }')
         return loss
 
 
@@ -20,7 +18,4 @@ class CGANGeneratorLoss(nn.Module):
 
     def __call__(self, fake):
         loss = -1 * torch.mean(torch.log(fake))  # Trick
-        if fake < 0 or fake > 1:
-            print(f'G:{fake = }')
-            print(f'  {loss = }')
         return loss

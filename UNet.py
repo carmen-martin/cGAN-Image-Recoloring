@@ -62,10 +62,10 @@ class downsampling(nn.Module):
 # Upsampling (doubleconv+upsampling)
 class upsampling(nn.Module):
     
-    def __init__(self, in_channels, out_channels, upsampling_mode, output_input):
+    def __init__(self, in_channels, out_channels, upsampling_mode, concat_mode):
         super().__init__()
         self.upsamplig_mode = upsampling_mode
-        self.concat_mode = output_input
+        self.concat_mode = concat_mode
         
         self.upsample = nn.Sequential(
             nn.Upsample(scale_factor=2, mode=upsampling_mode), #mode can be:'nearest','linear','bilinear','bicubic','trilinear'
@@ -139,10 +139,10 @@ class final(nn.Module):
     def forward(self, x):
         # For output_size = input_size
         if self.output_input == 'same':
-            return self.output_same
+            return self.output_same(x)
         # If it is okay for output and input sizes being different
         elif self.output_input == 'different':
-            return self.output(x) 
+            return self.output_valid(x) 
         else:
             raise Exception(f"{self.output_input} is not a valid input for output_input")
 
@@ -163,13 +163,13 @@ class UNet(nn.Module):
         self.contraction4 = downsampling(512, 1024)
         
         # Expanding path - half features channels at each upsampling
-        self.expansion1 = upsampling(1024, 512, upsampling_mode=upsampling_mode, concat_mode=concat_mode)
-        self.expansion2 = upsampling(512, 256, upsampling_mode=upsampling_mode, concat_mode=concat_mode)
-        self.expansion3 = upsampling(256, 128, upsampling_mode=upsampling_mode, concat_mode=concat_mode)
-        self.expansion4 = upsampling(128, 64, upsampling_mode=upsampling_mode, concat_mode=concat_mode)
+        self.expansion1 = upsampling(1024, 512, upsampling_mode=upsampling_mode, concat_mode=output_input)
+        self.expansion2 = upsampling(512, 256, upsampling_mode=upsampling_mode, concat_mode=output_input)
+        self.expansion3 = upsampling(256, 128, upsampling_mode=upsampling_mode, concat_mode=output_input)
+        self.expansion4 = upsampling(128, 64, upsampling_mode=upsampling_mode, concat_mode=output_input)
         
         # Output process
-        self.output = final(64, out_channels, upsampling_mode=upsampling_mode, output_size=output_size)
+        self.output = final(64, out_channels, output_size=output_size, upsampling_mode=upsampling_mode, output_input=output_input)
         
         # Dropout
         self.init_dropout = nn.Dropout2d(p=0.2)
